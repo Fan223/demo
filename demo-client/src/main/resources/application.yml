@@ -6,15 +6,15 @@ spring:
     oauth2:
       client:
         registration:
-          messaging-client-oidc:
+          fan:
             provider: demo-server
-            client-id: messaging-client
+            client-id: fan-client
             client-secret: 123456
             authorization-grant-type: authorization_code
-            scope: openid,profile
+            scope: openid,profile,fan
         provider:
           demo-server:
-            issuer-uri: http://172.16.63.132:7000
-#      resourceserver:
-#        jwt:
-#          issuer-uri: http://172.16.63.132:7000
+            issuer-uri: http://127.0.0.1:7000
+      resourceserver:
+        jwt:
+          issuer-uri: http://127.0.0.1:7000
