@@ -6,6 +6,7 @@ import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import demo.server.handler.CustomAuthenticationEntryPoint;
+import fan.fancy.server.resource.starter.servlet.configurer.FancyResourceServerConfigurer;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,12 +15,14 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationService;
@@ -28,6 +31,8 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -38,7 +43,8 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -87,21 +93,20 @@ public class DemoServerConfig {
 
     @Bean
     @Order(2)
-    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) {
+    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http, FancyResourceServerConfigurer resourceServerConfigurer) {
         // 禁用csrf
 //        http.csrf(AbstractHttpConfigurer::disable);
         // 开启CORS配置，配合下边的CorsConfigurationSource配置实现跨域配置
-        http.cors(Customizer.withDefaults());
-        http.authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/api/**", "/login", "/assets/**", "/error").permitAll()
-                        .anyRequest().authenticated()
-                )
+
+        http.apply(resourceServerConfigurer);
+        http.authorizeHttpRequests(registry -> registry
+                .requestMatchers("/api/**", "/login", "/assets/**", "/error").permitAll()
+                .anyRequest().authenticated());
+
+        http.cors(Customizer.withDefaults())
                 // Form login handles the redirect to the login page from the
                 // authorization server filter chain
-                .formLogin(Customizer.withDefaults())
-                .oauth2ResourceServer(oauth2ResourceServer ->
-                        oauth2ResourceServer.jwt(Customizer.withDefaults())
-                );
+                .formLogin(Customizer.withDefaults());
 
         http.exceptionHandling(configurer -> configurer
                 .authenticationEntryPoint(customAuthenticationEntryPoint));
@@ -201,6 +206,32 @@ public class DemoServerConfig {
         return AuthorizationServerSettings.builder()
                 .issuer("http://127.0.0.1:7000")
                 .build();
+    }
+
+    @Bean
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtEncodingContextOAuth2TokenCustomizer() {
+        return context -> {
+            // 检查登录用户信息是不是UserDetails，排除掉没有用户参与的流程
+            if (context.getPrincipal().getPrincipal() instanceof UserDetails user) {
+                // 获取申请的scopes
+                Set<String> scopes = context.getAuthorizedScopes();
+                // 获取用户的权限
+                Collection<? extends GrantedAuthority> authorities = user.getAuthorities();
+                // 提取权限并转为字符串
+                Set<String> authoritySet = Optional.of(authorities).orElse(Collections.emptyList()).stream()
+                        // 获取权限字符串
+                        .map(GrantedAuthority::getAuthority)
+                        // 去重
+                        .collect(Collectors.toSet());
+
+                // 合并scope与用户信息
+                authoritySet.addAll(scopes);
+
+                JwtClaimsSet.Builder claims = context.getClaims();
+                // 将权限信息放入jwt的claims中（也可以生成一个以指定字符分割的字符串放入）
+                claims.claim("authorities", authoritySet);
+            }
+        };
     }
 
     @Bean
